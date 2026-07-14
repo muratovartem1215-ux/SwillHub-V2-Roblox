@@ -1,4 +1,4 @@
--- SWILL Telekinesis ULTIMATE (MULTILANGUAGE)
+-- SWILL Telekinesis ULTIMATE (GLOBAL RING VISIBLE TO ALL)
 -- English | Русский | Español
 
 local player = game.Players.LocalPlayer
@@ -6,6 +6,22 @@ local mouse = player:GetMouse()
 local workspace = game:GetService("Workspace")
 local runService = game:GetService("RunService")
 local userInput = game:GetService("UserInputService")
+
+-- === ГЛОБАЛЬНОЕ ХРАНИЛИЩЕ КОЛЬЦА (ВИДИМО ВСЕМ) ===
+local GlobalRing = {
+    IsActive = false,
+    Blocks = {}, -- {part, angle, speed, radius, height, color}
+    Owner = nil,
+    Folder = nil -- папка в workspace для группировки
+}
+
+-- Создаём папку для колец (если нет)
+local ringFolder = workspace:FindFirstChild("SWILL_RingFolder")
+if not ringFolder then
+    ringFolder = Instance.new("Folder")
+    ringFolder.Name = "SWILL_RingFolder"
+    ringFolder.Parent = workspace
+end
 
 -- === ЯЗЫКОВЫЕ СЛОВАРИ ===
 local LANG = {
@@ -41,7 +57,8 @@ local LANG = {
         no_blocks_super = "No blocks for SUPER DESTRUCTION",
         found_blocks = "Found blocks: ",
         checked = "checked",
-        no_hrp = "No HumanoidRootPart"
+        no_hrp = "No HumanoidRootPart",
+        ring_owned = "Ring owned by: "
     },
     ["ru"] = {
         title = "ТЕЛЕКИНЕЗ SWILL ULTIMATE",
@@ -75,7 +92,8 @@ local LANG = {
         no_blocks_super = "Нет блоков для СУПЕР УНИЧТОЖЕНИЯ",
         found_blocks = "Найдено блоков: ",
         checked = "проверено",
-        no_hrp = "Нет HumanoidRootPart"
+        no_hrp = "Нет HumanoidRootPart",
+        ring_owned = "Владелец кольца: "
     },
     ["es"] = {
         title = "TELEQUINESIS SWILL ULTIMATE",
@@ -109,11 +127,12 @@ local LANG = {
         no_blocks_super = "Sin bloques para SUPERS DESTRUCCIÓN",
         found_blocks = "Bloques encontrados: ",
         checked = "revisados",
-        no_hrp = "Sin HumanoidRootPart"
+        no_hrp = "Sin HumanoidRootPart",
+        ring_owned = "Dueño del anillo: "
     }
 }
 
-local currentLang = "ru" -- можно сменить на "en" или "es"
+local currentLang = "ru"
 
 -- === GUI ===
 local screenGui = Instance.new("ScreenGui")
@@ -158,7 +177,6 @@ countLabel.Font = Enum.Font.Gotham
 countLabel.TextSize = 13
 countLabel.Parent = frame
 
--- Кнопка выбора языка
 local langBtn = Instance.new("TextButton")
 langBtn.Size = UDim2.new(0, 50, 0, 25)
 langBtn.Position = UDim2.new(1, -60, 0, 5)
@@ -191,16 +209,14 @@ local function createButton(text, y, color, callback)
     return btn
 end
 
--- === ДАННЫЕ ===
+-- === ЛОКАЛЬНЫЕ ДАННЫЕ ===
 local blocks = {}
 local players = {}
-local ringBlocks = {}
 local maxBlocks = 6
 local distance = 15
 local minDist = 3
 local maxDist = 40
 local timer = 0
-local isRingActive = false
 local ringRadius = 20
 local ringSpeed = 3.5
 local ringHeight = 3
@@ -216,16 +232,6 @@ local rainbowColors = {
     Color3.fromRGB(75, 0, 130),
     Color3.fromRGB(148, 0, 211),
 }
-
--- === ФУНКЦИЯ ОБНОВЛЕНИЯ ЯЗЫКА ===
-local function updateLanguage()
-    local lang = LANG[currentLang]
-    title.Text = lang.title
-    langBtn.Text = lang.lang_btn
-    -- Кнопки обновляются при создании, но для динамики пересоздадим их позже
-    -- Сейчас просто обновим счётчик
-    updateCount()
-end
 
 -- === ФУНКЦИИ ===
 local function isPlayerPart(part)
@@ -244,7 +250,7 @@ local function findBlock()
     local bestDist = 60
     local grabbed = {}
     for _, b in ipairs(blocks) do grabbed[b.part] = true end
-    for _, r in ipairs(ringBlocks) do grabbed[r.part] = true end
+    for _, r in ipairs(GlobalRing.Blocks) do grabbed[r.part] = true end
     for _, part in ipairs(workspace:GetDescendants()) do
         if part:IsA("BasePart") and not part.Anchored and not isPlayerPart(part) and not grabbed[part] then
             local d = (part.Position - mousePos).Magnitude
@@ -288,12 +294,16 @@ end
 
 local function updateCount()
     local lang = LANG[currentLang]
-    countLabel.Text = lang.blocks .. ": " .. #blocks .. "/6 | " .. lang.players .. ": " .. #players .. " | " .. lang.ring .. ": " .. #ringBlocks
+    countLabel.Text = lang.blocks .. ": " .. #blocks .. "/6 | " .. lang.players .. ": " .. #players .. " | " .. lang.ring .. ": " .. #GlobalRing.Blocks
 end
 
 local function grabBlock(part)
     if #blocks >= maxBlocks then
         print("[SWILL] " .. LANG[currentLang].max_blocks)
+        return
+    end
+    if GlobalRing.IsActive then
+        print("[SWILL] " .. LANG[currentLang].cant_grab)
         return
     end
     local idx = #blocks + 1
@@ -310,6 +320,10 @@ end
 
 local function grabPlayer(plr)
     if not plr or not plr.Character then return end
+    if GlobalRing.IsActive then
+        print("[SWILL] " .. LANG[currentLang].cant_grab)
+        return
+    end
     local parts = {}
     for _, part in ipairs(plr.Character:GetDescendants()) do
         if part:IsA("BasePart") then
@@ -329,6 +343,10 @@ end
 
 local function throwAll(target)
     if not target or not target.Character then return end
+    if GlobalRing.IsActive then
+        print("[SWILL] " .. LANG[currentLang].cant_grab)
+        return
+    end
     local targetHrp = target.Character:FindFirstChild("HumanoidRootPart")
     if not targetHrp then return end
     for _, data in ipairs(blocks) do
@@ -388,6 +406,10 @@ local function throwAll(target)
 end
 
 local function releaseAll()
+    if GlobalRing.IsActive then
+        print("[SWILL] " .. LANG[currentLang].cant_grab)
+        return
+    end
     for _, data in ipairs(blocks) do
         local part = data.part
         if part and part.Parent then
@@ -417,10 +439,15 @@ local function releaseAll()
     print("[SWILL] " .. LANG[currentLang].released)
 end
 
+-- === ГЛОБАЛЬНОЕ КОЛЬЦО (ВИДИМО ВСЕМ) ===
 local function superDestruction()
-    if isRingActive then
-        isRingActive = false
-        for _, data in ipairs(ringBlocks) do
+    if GlobalRing.IsActive then
+        -- Отключаем глобальное кольцо
+        GlobalRing.IsActive = false
+        GlobalRing.Owner = nil
+        
+        -- Возвращаем блоки в нормальное состояние
+        for _, data in ipairs(GlobalRing.Blocks) do
             local part = data.part
             if part and part.Parent then
                 part.Material = Enum.Material.Plastic
@@ -429,21 +456,30 @@ local function superDestruction()
                 part.Velocity = Vector3.new(0,0,0)
                 part.RotVelocity = Vector3.new(0,0,0)
                 part.CanCollide = true
+                part.Transparency = 0
+                -- Удаляем из папки (оставляем в workspace)
+                if part.Parent == ringFolder then
+                    part.Parent = workspace
+                end
             end
         end
-        ringBlocks = {}
+        GlobalRing.Blocks = {}
         updateCount()
         print("[SWILL] " .. LANG[currentLang].super_off)
         return
     end
+    
     local hrp = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
     if not hrp then
         print("[SWILL] " .. LANG[currentLang].no_hrp)
         return
     end
+    
     local playerPos = hrp.Position
     local collected = {}
     local totalChecked = 0
+    
+    -- Собираем ТОЛЬКО Unanchored блоки (Anchored == false)
     for _, part in ipairs(workspace:GetDescendants()) do
         if part:IsA("BasePart") and not part.Anchored and not isPlayerPart(part) then
             totalChecked = totalChecked + 1
@@ -453,11 +489,15 @@ local function superDestruction()
             end
         end
     end
+    
     if #collected == 0 then
         print("[SWILL] " .. LANG[currentLang].no_blocks_super .. " (" .. LANG[currentLang].checked .. ": " .. totalChecked .. ")")
         return
     end
+    
     print("[SWILL] " .. LANG[currentLang].found_blocks .. #collected .. " (" .. LANG[currentLang].checked .. ": " .. totalChecked .. ")")
+    
+    -- Очищаем локальные захваты
     for _, data in ipairs(blocks) do
         local part = data.part
         if part and part.Parent then
@@ -470,6 +510,7 @@ local function superDestruction()
         end
     end
     blocks = {}
+    
     for _, data in ipairs(players) do
         for _, part in ipairs(data.parts) do
             if part and part.Parent then
@@ -483,13 +524,17 @@ local function superDestruction()
         end
     end
     players = {}
-    for _, data in ipairs(ringBlocks) do
+    
+    -- Очищаем предыдущее глобальное кольцо
+    for _, data in ipairs(GlobalRing.Blocks) do
         local part = data.part
         if part and part.Parent then
             part:Destroy()
         end
     end
-    ringBlocks = {}
+    GlobalRing.Blocks = {}
+    
+    -- Создаём НОВОЕ глобальное кольцо (видимое всем)
     local count = #collected
     for i, part in ipairs(collected) do
         local angle = (i / count) * math.pi * 2
@@ -499,6 +544,11 @@ local function superDestruction()
         local x = math.cos(angle) * radius
         local z = math.sin(angle) * radius
         local targetPos = playerPos + Vector3.new(x, height, z)
+        
+        -- Перемещаем блок в папку (для группировки)
+        part.Parent = ringFolder
+        
+        -- Телепортируем
         part.CFrame = CFrame.new(targetPos)
         part.Velocity = Vector3.new(0,0,0)
         part.RotVelocity = Vector3.new(0,0,0)
@@ -507,7 +557,8 @@ local function superDestruction()
         part.CustomPhysicalProperties = PhysicalProperties.new(0, 0, 0, 0, 0)
         part.CanCollide = true
         part.Transparency = 0.1
-        table.insert(ringBlocks, {
+        
+        table.insert(GlobalRing.Blocks, {
             part = part,
             angle = angle,
             speed = ringSpeed + math.random(-0.5, 0.5),
@@ -516,27 +567,30 @@ local function superDestruction()
             color = color
         })
     end
-    isRingActive = true
+    
+    GlobalRing.IsActive = true
+    GlobalRing.Owner = player.Name
     updateCount()
-    print("[SWILL] " .. LANG[currentLang].super_on .. #ringBlocks .. LANG[currentLang].blocks_teleported)
+    print("[SWILL] " .. LANG[currentLang].super_on .. #GlobalRing.Blocks .. LANG[currentLang].blocks_teleported)
+    print("[SWILL] " .. LANG[currentLang].ring_owned .. player.Name)
 end
 
 -- === СОЗДАНИЕ КНОПОК ===
 local btn1 = createButton(LANG[currentLang].grab_block, 65, Color3.fromRGB(0, 150, 200), function()
-    if isRingActive then print("[SWILL] " .. LANG[currentLang].cant_grab) return end
+    if GlobalRing.IsActive then print("[SWILL] " .. LANG[currentLang].cant_grab) return end
     if #blocks >= maxBlocks then return end
     local part = findBlock()
     if part then grabBlock(part) else print("[SWILL] " .. LANG[currentLang].no_block) end
 end)
 
 local btn2 = createButton(LANG[currentLang].grab_player, 101, Color3.fromRGB(255, 50, 200), function()
-    if isRingActive then print("[SWILL] " .. LANG[currentLang].cant_grab) return end
+    if GlobalRing.IsActive then print("[SWILL] " .. LANG[currentLang].cant_grab) return end
     local plr = findPlayer()
     if plr then grabPlayer(plr) else print("[SWILL] " .. LANG[currentLang].no_player) end
 end)
 
 local btn3 = createButton(LANG[currentLang].throw_all, 137, Color3.fromRGB(255, 100, 0), function()
-    if isRingActive then print("[SWILL] " .. LANG[currentLang].cant_grab) return end
+    if GlobalRing.IsActive then print("[SWILL] " .. LANG[currentLang].cant_grab) return end
     if #blocks > 0 or #players > 0 then
         local target = findTarget()
         if target then throwAll(target) end
@@ -544,15 +598,14 @@ local btn3 = createButton(LANG[currentLang].throw_all, 137, Color3.fromRGB(255, 
 end)
 
 local btn4 = createButton(LANG[currentLang].zoom_in, 173, Color3.fromRGB(0, 200, 100), function()
-    if not isRingActive then distance = math.max(minDist, distance - 2) end
+    if not GlobalRing.IsActive then distance = math.max(minDist, distance - 2) end
 end)
 
 local btn5 = createButton(LANG[currentLang].zoom_out, 209, Color3.fromRGB(200, 200, 0), function()
-    if not isRingActive then distance = math.min(maxDist, distance + 2) end
+    if not GlobalRing.IsActive then distance = math.min(maxDist, distance + 2) end
 end)
 
 local btn6 = createButton(LANG[currentLang].release_all, 245, Color3.fromRGB(200, 50, 50), function()
-    if isRingActive then print("[SWILL] " .. LANG[currentLang].cant_grab) return end
     releaseAll()
 end)
 
@@ -561,7 +614,7 @@ local btn7 = createButton(LANG[currentLang].super_destruction, 281, Color3.fromR
 end)
 
 local btn8 = createButton(LANG[currentLang].remove_last, 317, Color3.fromRGB(150, 0, 150), function()
-    if isRingActive then print("[SWILL] " .. LANG[currentLang].cant_grab) return end
+    if GlobalRing.IsActive then print("[SWILL] " .. LANG[currentLang].cant_grab) return end
     if #blocks > 0 then
         local data = blocks[#blocks]
         if data and data.part and data.part.Parent then
@@ -578,7 +631,7 @@ local btn8 = createButton(LANG[currentLang].remove_last, 317, Color3.fromRGB(150
 end)
 
 local btn9 = createButton(LANG[currentLang].disable_ring, 353, Color3.fromRGB(100, 100, 100), function()
-    if isRingActive then superDestruction() else print("[SWILL] " .. LANG[currentLang].ring_inactive) end
+    if GlobalRing.IsActive then superDestruction() else print("[SWILL] " .. LANG[currentLang].ring_inactive) end
 end)
 
 -- === ЛОГИКА СМЕНЫ ЯЗЫКА ===
@@ -589,7 +642,6 @@ langBtn.MouseButton1Click:Connect(function()
     idx = idx % #langs + 1
     currentLang = langs[idx]
     
-    -- Обновляем все тексты
     local lang = LANG[currentLang]
     title.Text = lang.title
     langBtn.Text = lang.lang_btn
@@ -608,7 +660,7 @@ end)
 
 -- === УПРАВЛЕНИЕ ===
 mouse.Button1Down:Connect(function()
-    if isRingActive then print("[SWILL] " .. LANG[currentLang].cant_grab) return end
+    if GlobalRing.IsActive then print("[SWILL] " .. LANG[currentLang].cant_grab) return end
     if #blocks >= maxBlocks then return end
     local part = findBlock()
     if part then grabBlock(part) end
@@ -617,31 +669,32 @@ end)
 userInput.InputBegan:Connect(function(input, processed)
     if processed then return end
     if input.KeyCode == Enum.KeyCode.C then
-        if isRingActive then print("[SWILL] " .. LANG[currentLang].cant_grab) return end
+        if GlobalRing.IsActive then print("[SWILL] " .. LANG[currentLang].cant_grab) return end
         local plr = findPlayer()
         if plr then grabPlayer(plr) end
     end
     if input.KeyCode == Enum.KeyCode.N then
-        if isRingActive then print("[SWILL] " .. LANG[currentLang].cant_grab) return end
+        if GlobalRing.IsActive then print("[SWILL] " .. LANG[currentLang].cant_grab) return end
         if #blocks > 0 or #players > 0 then
             local target = findTarget()
             if target then throwAll(target) end
         end
     end
     if input.KeyCode == Enum.KeyCode.J then
-        if not isRingActive then distance = math.max(minDist, distance - 2) end
+        if not GlobalRing.IsActive then distance = math.max(minDist, distance - 2) end
     end
     if input.KeyCode == Enum.KeyCode.U then
-        if not isRingActive then distance = math.min(maxDist, distance + 2) end
+        if not GlobalRing.IsActive then distance = math.min(maxDist, distance + 2) end
     end
     if input.KeyCode == Enum.KeyCode.X then
         superDestruction()
     end
 end)
 
--- === ЦИКЛ ДВИЖЕНИЯ ===
+-- === ГЛОБАЛЬНЫЙ ЦИКЛ ДВИЖЕНИЯ КОЛЬЦА (ВИДИМ ВСЕМ) ===
 runService.RenderStepped:Connect(function()
-    if not isRingActive then
+    -- Локальный телекинез (блоки и игроки)
+    if not GlobalRing.IsActive then
         local total = #blocks + #players
         if total == 0 then return end
         if not player.Character then return end
@@ -679,11 +732,21 @@ runService.RenderStepped:Connect(function()
             end
         end
     else
-        local hrp = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
+        -- ГЛОБАЛЬНОЕ КОЛЬЦО (двигается за ВЛАДЕЛЬЦЕМ)
+        local owner = game.Players:FindFirstChild(GlobalRing.Owner)
+        if not owner or not owner.Character then
+            -- Если владелец ушёл, отключаем кольцо
+            superDestruction()
+            return
+        end
+        
+        local hrp = owner.Character:FindFirstChild("HumanoidRootPart")
         if not hrp then return end
+        
         local center = hrp.Position
         local time = tick()
-        for _, data in ipairs(ringBlocks) do
+        
+        for _, data in ipairs(GlobalRing.Blocks) do
             local part = data.part
             if part and part.Parent then
                 local currentAngle = data.angle + time * data.speed * 0.5
@@ -692,23 +755,25 @@ runService.RenderStepped:Connect(function()
                 local x = math.cos(currentAngle) * radius
                 local z = math.sin(currentAngle) * radius
                 local targetPos = center + Vector3.new(x, height, z)
+                
                 part.Velocity = (targetPos - part.Position) * 25
                 part.RotVelocity = Vector3.new(0, 20, 0)
                 part.CustomPhysicalProperties = PhysicalProperties.new(0, 0, 0, 0, 0)
                 part.Color = data.color
                 part.Transparency = 0.1
+                part.Material = Enum.Material.Neon
             end
         end
     end
 end)
 
--- === УБИЙСТВО ===
+-- === ГЛОБАЛЬНОЕ УБИЙСТВО ===
 local killTimer = 0
 runService.Heartbeat:Connect(function(dt)
     killTimer = killTimer + dt
-    if isRingActive and killTimer > 0.1 then
+    if GlobalRing.IsActive and killTimer > 0.1 then
         killTimer = 0
-        for _, data in ipairs(ringBlocks) do
+        for _, data in ipairs(GlobalRing.Blocks) do
             local part = data.part
             if part and part.Parent then
                 for _, plr in ipairs(game.Players:GetPlayers()) do
@@ -740,7 +805,9 @@ runService.Heartbeat:Connect(function(dt)
             end
         end
     end
-    if not isRingActive then
+    
+    -- Локальная коллизия (для ручных блоков)
+    if not GlobalRing.IsActive then
         timer = timer + dt
         if timer < 0.5 then return end
         timer = 0
@@ -778,6 +845,7 @@ runService.Heartbeat:Connect(function(dt)
     end
 end)
 
-print("[SWILL] MULTILANGUAGE ACTIVATED! | English | Русский | Español")
+print("[SWILL] GLOBAL RING ACTIVATED! Visible to ALL players.")
 print("[SWILL] LMB - block | C - player | J/U - zoom | N - throw | X - SUPER DESTRUCTION")
+print("[SWILL] Ring collects ONLY Unanchored blocks (Anchored = false)")
 print("[SWILL] Click 🌐 button to switch language")
